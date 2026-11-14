@@ -5,7 +5,8 @@ const { createServer } = require('http');
 const { parse } = require('url');
 const next = require('next');
 
-const port = parseInt(process.env.PORT, 10) || 3000;
+const rawPort = process.env.PORT;
+const port = rawPort ? (isNaN(Number(rawPort)) ? rawPort : parseInt(rawPort, 10)) : 3000;
 const app = next({ dev: false });
 const handle = app.getRequestHandler();
 

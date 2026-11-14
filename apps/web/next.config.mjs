@@ -7,11 +7,14 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const nextConfig = {
   transpilePackages: ['@ecommerce/shared'],
   // Shared hosting kills the build (SIGKILL, exit -9) during the
-  // type-check/lint phase: it uses too much memory there. Skip both
-  // during the server build; types are still checked by `npm run
-  // typecheck` locally and in CI.
+  // type-check/lint phase and static generation: it uses too much memory.
+  // Skip type-check/lint and restrict build to 1 CPU / no worker threads.
   typescript: { ignoreBuildErrors: true },
   eslint: { ignoreDuringBuilds: true },
+  experimental: {
+    cpus: 1,
+    workerThreads: false,
+  },
   images: {
     remotePatterns: [{ protocol: 'https', hostname: '**' }],
   },
