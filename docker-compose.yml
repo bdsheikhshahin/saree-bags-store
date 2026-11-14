@@ -1,0 +1,116 @@
+# ============================================================================
+# E-commerce — production stack on one VPS (Docker Compose)
+#
+#   web   — Next.js storefront          http://<your-vps-ip>:3000
+#   api   — Express + TypeScript API    http://<your-vps-ip>:4000
+#   mongo — MongoDB 7, data in a named volume (survives container rebuilds)
+#
+# FIRST-TIME SETUP (see DEPLOY.md for the full guide):
+#   1. cp apps/web/.env.production.example apps/web/.env.production
+#      cp apps/api/.env.production.example  apps/api/.env.production
+#      ...then fill in the REAL values in those two files.
+#   2. docker compose up -d --build
+#   3. Seed the database once: docker compose exec api npm run seed --workspace=@ecommerce/api
+#   4. Verify: curl http://localhost:4000/health  and open http://localhost:3000
+#
+# HOW THE SERVICES TALK TO EACH OTHER:
+#   - Inside this Compose network the API reaches MongoDB as `mongo:27017`
+#     (the service name is the hostname). MONGO_URI is set below to
+#     mongodb://mongo:27017/ecommerce — do NOT point it at localhost here.
+#   - The STORE (in the visitor's browser) calls the API at NEXT_PUBLIC_API_URL.
+#     That URL must be reachable from the PUBLIC internet, not from inside
+#     Docker, so set it to your public API address (e.g. https://api.yourdomain.com
+#     or http://<your-vps-ip>:4000). It is baked into the web image at BUILD
+#     time, so changing it requires a rebuild:
+#       NEXT_PUBLIC_API_URL=https://api.yourdomain.com docker compose up -d --build web
+#   - CORS_ORIGIN (in apps/api/.env.production) must be your public store URL.
+#
+# ENV VAR PRECEDENCE: `environment:` below wins over `env_file:`. The API's
+# MONGO_URI is therefore the compose-network value here, even if the env file
+# contains a different (e.g. Atlas) URI for non-Docker runs.
+# ============================================================================
+
+services:
+  mongo:
+    image: mongo:7
+    container_name: ecommerce-mongo
+    restart: unless-stopped
+    # MongoDB is reachable ONLY from this machine — never expose it to the internet.
+    ports:
+      - "127.0.0.1:27017:27017"
+    volumes:
+      - mongo-data:/data/db
+    healthcheck:
+      test: ["CMD", "mongosh", "--quiet", "--eval", "db.adminCommand('ping')"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+
+  api:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: ecommerce-api
+    restart: unless-stopped
+    # One service per container: run only the API (overrides the Dockerfile
+    # default, which runs both services via start.sh).
+    command: ["npm", "start", "--workspace=@ecommerce/api"]
+    env_file:
+      - ./apps/api/.env.production
+    environment:
+      PORT: "4000"
+      # Compose-network address of the mongo service (overrides env_file).
+      MONGO_URI: mongodb://mongo:27017/ecommerce
+    ports:
+      - "4000:4000"
+    depends_on:
+      mongo:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://localhost:4000/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 15s
+
+  web:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      args:
+        # NEXT_PUBLIC_* values are baked into the web app at BUILD time.
+        # Set them in your shell (or a .env file at the repo root) before
+        # building, otherwise the localhost defaults below are used.
+        NEXT_PUBLIC_API_URL: ${NEXT_PUBLIC_API_URL:-http://localhost:4000}
+        NEXT_PUBLIC_SITE_URL: ${NEXT_PUBLIC_SITE_URL:-http://localhost:3000}
+        NEXT_PUBLIC_GTM_ID: ${NEXT_PUBLIC_GTM_ID:-}
+        NEXT_PUBLIC_GA_CONSENT_DEFAULT: ${NEXT_PUBLIC_GA_CONSENT_DEFAULT:-denied}
+    container_name: ecommerce-web
+    restart: unless-stopped
+    # One service per container: run only the storefront.
+    command: ["npm", "start", "--workspace=@ecommerce/web"]
+    env_file:
+      - ./apps/web/.env.production
+    environment:
+      # Runtime copy of the same value (the build arg above is what the
+      # browser actually uses; keep both in sync).
+      NEXT_PUBLIC_API_URL: ${NEXT_PUBLIC_API_URL:-http://localhost:4000}
+      NEXT_PUBLIC_SITE_URL: ${NEXT_PUBLIC_SITE_URL:-http://localhost:3000}
+    ports:
+      - "3000:3000"
+    depends_on:
+      api:
+        condition: service_healthy
+    healthcheck:
+      # The web app has no /health route, so we check the homepage.
+      test: ["CMD", "node", "-e", "fetch('http://localhost:3000/').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 20s
+
+volumes:
+  # Persistent MongoDB data. `docker compose down` keeps it; only
+  # `docker compose down -v` deletes it (do not run that in production).
+  mongo-data:

@@ -1,0 +1,14 @@
+node_modules/
+dist/
+.next/
+out/
+.env
+.env.local
+.env.production
+apps/*/.env.production
+*.log
+.DS_Store
+
+# Local-only: MongoDB data + binary (VM)
+.data/
+.tools/
