@@ -1,5 +1,7 @@
 node_modules/
-dist/
+# dist/ — compiled output is committed so cPanel shared hosting
+# can run `node dist/index.js` without needing a build step on the server.
+# Only the web (.next) and local dev output are excluded:
 .next/
 out/
 .env
